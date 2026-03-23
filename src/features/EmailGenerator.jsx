@@ -91,11 +91,11 @@ export function EmailGenerator() {
                 setTemplateBody(bodyHtml);
                 setTemplateHtml(html);
 
-                // Auto-detect Placeholders
+                // Auto-detect Placeholders: Support both {{...}} and [[...]]
                 const allText = subjectText + ' ' + bodyHtml;
-                const matches = allText.match(/\{\{(.*?)\}\}/g);
+                const matches = allText.match(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g);
                 if (matches) {
-                    const uniquePlaceholders = [...new Set(matches.map(m => m.replace(/[{}]/g, '').trim()))];
+                    const uniquePlaceholders = [...new Set(matches.map(m => m.replace(/[{}[\]]/g, '').trim()))];
                     setPlaceholders(uniquePlaceholders);
                     toast.success(`Đã trích xuất ${uniquePlaceholders.length} placeholders từ Template.`);
                 } else {
@@ -166,9 +166,35 @@ export function EmailGenerator() {
         return dateStr;
     };
 
+    // Helper: Xóa dấu Tiếng Việt để đặt tên file an toàn
+    const removeVietnameseTones = (str) => {
+        if (!str) return '';
+        str = str.toString();
+        str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+        str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+        str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+        str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+        str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+        str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+        str = str.replace(/đ/g, "d");
+        str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+        str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+        str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+        str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+        str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+        str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+        str = str.replace(/Đ/g, "D");
+        // Remove special characters, preserve spaces
+        str = str.replace(/[^a-zA-Z0-9 ]/g, "");
+        // Replace spaces with underscores
+        str = str.replace(/\s+/g, "_");
+        return str.trim();
+    };
+
     // Logic thay thế dữ liệu
     const replacePlaceholders = (template, dataRow) => {
-        return template.replace(/\{\{(.*?)\}\}/g, (match, phRaw) => {
+        return template.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
+            const phRaw = ph1 || ph2 || '';
             const ph = phRaw.trim();
             
             // Tìm trong Excel
@@ -186,7 +212,7 @@ export function EmailGenerator() {
 
             // Error Highlight
             if (value === '' && previewMode === 'parsed') {
-                return `<span style="background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 0.85em; border: 1px solid #fca5a5; display: inline-flex; align-items: center; gap: 4px;" title="Lỗi: Chưa định nghĩa giá trị này">⚠️ {{${ph}}}</span>`;
+                return `<span style="background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 0.85em; border: 1px solid #fca5a5; display: inline-flex; align-items: center; gap: 4px;" title="Lỗi: Chưa định nghĩa giá trị này">⚠️ ${match}</span>`;
             }
 
             // Format cho biến English Date
@@ -202,8 +228,9 @@ export function EmailGenerator() {
         return `=?utf-8?B?${window.btoa(unescape(encodeURIComponent(str)))}?=`;
     };
 
-    const generateEML = (to, cc, subject, body) => {
+    const generateEML = (from, to, cc, subject, body) => {
         let eml = '';
+        if (from) eml += `From: ${from}\r\n`;
         if (to) eml += `To: ${to}\r\n`;
         if (cc) eml += `Cc: ${cc}\r\n`;
         eml += `Subject: ${encodeSubject(subject)}\r\n`;
@@ -231,16 +258,23 @@ export function EmailGenerator() {
             // Sử dụng setImmediate (hoặc setTimeout) để nhường luồng xử lý cho UI render ProgressBar
             for (let i = 0; i < excelData.length; i++) {
                 const row = excelData[i];
-                let to = row['To'] || row['TO'] || row['to'] || '';
-                let cc = row['CC'] || row['Cc'] || row['cc'] || '';
+                let fromRaw = row['From'] || row['FROM'] || row['from'] || '';
+                let toRaw = row['To'] || row['TO'] || row['to'] || '';
+                let ccRaw = row['CC'] || row['Cc'] || row['cc'] || '';
+                
+                // Chuẩn hóa email: cắt bằng dấu ; và strip khoảng trắng
+                let from = fromRaw ? fromRaw.toString().split(';').map(e => e.trim()).filter(Boolean).join(', ') : '';
+                let to = toRaw ? toRaw.toString().split(';').map(e => e.trim()).filter(Boolean).join(', ') : '';
+                let cc = ccRaw ? ccRaw.toString().split(';').map(e => e.trim()).filter(Boolean).join(', ') : '';
                 
                 // Khi tạo file thật thì chúng ta tạm set fallback highlight red = false (bằng cách truyền param hoặc giả lập)
                 // Tuy nhiên hiện hàm replace không truyền chế độ, nên ta bọc mode parse để không inject html đỏ
                 const backupMode = previewMode;
                 
                 // Tính toán subject body
-                // Ở đây ta dùng hàm replace, nhưng nếu không có thì để nguyên chữ \{\{..\}\} trong file Word thay vì HTML
-                const subject = templateSubject.replace(/\{\{(.*?)\}\}/g, (match, phRaw) => {
+                // Ở đây ta dùng hàm replace, hỗ trợ cả {{}} và [[]], nhưng nếu không có thì để nguyên thay vì sinh HTML
+                const subject = templateSubject.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
+                    const phRaw = ph1 || ph2 || '';
                     const ph = phRaw.trim();
                     let val = row[ph];
                     if (val === undefined || val === null || val === '') {
@@ -254,7 +288,8 @@ export function EmailGenerator() {
                     return val;
                 });
 
-                const body = templateBody.replace(/\{\{(.*?)\}\}/g, (match, phRaw) => {
+                const body = templateBody.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
+                    const phRaw = ph1 || ph2 || '';
                     const ph = phRaw.trim();
                     let val = row[ph];
                     if (val === undefined || val === null || val === '') {
@@ -268,13 +303,13 @@ export function EmailGenerator() {
                     return val;
                 });
                 
-                const emlContent = generateEML(to, cc, subject, body);
+                const emlContent = generateEML(from, to, cc, subject, body);
                 
-                let safeName = `Email_${i + 1}`;
-                if (row['CustomerName']) safeName = row['CustomerName'];
-                else if (to) safeName = to.split('@')[0];
-                
-                safeName = safeName.toString().replace(/[^a-z0-9_\u00C0-\u017F]/gi, '_');
+                // Chuẩn hóa tên file: Email_{STT}_{Recipient Name}
+                let stt = i + 1;
+                let recipient = row['Recepient Name'] || row['Recipient Name'] || row['CustomerName'] || row['Name'] || (to ? to.split('@')[0] : 'Unknown');
+                recipient = removeVietnameseTones(recipient);
+                let safeName = `Email_${stt}_${recipient}`;
                 
                 zip.file(`${safeName}.eml`, emlContent);
 
