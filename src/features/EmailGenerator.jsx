@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Mail, FileArchive, Database, FileText } from 'lucide-react';
+import { Upload, Mail, FileArchive, Database, FileText, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -22,6 +22,8 @@ export function EmailGenerator() {
     const [excelFileName, setExcelFileName] = useState('');
 
     const [isProcessing, setIsProcessing] = useState(false);
+    const [previewMode, setPreviewMode] = useState('raw'); // 'raw' | 'parsed'
+    const [previewRowIndex, setPreviewRowIndex] = useState(0);
 
     // 1. Xử lý Upload Template (Word docx)
     const handleTemplateUpload = (e) => {
@@ -119,6 +121,9 @@ export function EmailGenerator() {
                 setExcelData(sheetJson);
 
                 toast.success(`Đã tải ${sheetJson.length} dòng dữ liệu.`);
+                // Hiển thị ngay preview cho dữ liệu khi mới upload
+                setPreviewMode('parsed');
+                setPreviewRowIndex(0);
             } catch (error) {
                 console.error(error);
                 toast.error('Lỗi đọc file Excel.');
@@ -244,8 +249,9 @@ export function EmailGenerator() {
                 {/* Cột 1 & 2: Preview (Thiết kế rộng và chuyển sang trái) */}
                 <div className="lg:col-span-2 space-y-6">
                     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full h-[80vh]">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                        <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
+                            <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                                <Eye className="w-5 h-5 text-blue-600" />
                                 Preview Giao Diện Email
                             </h2>
                             <span className="text-xs font-semibold px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-200">
@@ -253,11 +259,53 @@ export function EmailGenerator() {
                             </span>
                         </div>
                         
+                        {/* Thanh công cụ xem trước */}
+                        <div className="flex items-center justify-between mb-4 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setPreviewMode('raw')}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${previewMode === 'raw' ? 'bg-white shadow-sm border border-slate-300 text-blue-700' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}
+                                >
+                                    Mã Giả (Template Gốc)
+                                </button>
+                                <button
+                                    onClick={() => setPreviewMode('parsed')}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-all ${previewMode === 'parsed' ? 'bg-white shadow-sm border border-slate-300 text-blue-700' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'}`}
+                                >
+                                    Xem trước Kết quả (Thực tế)
+                                </button>
+                            </div>
+
+                            {previewMode === 'parsed' && excelData.length > 0 && (
+                                <div className="flex items-center gap-3 pr-2">
+                                    <span className="text-xs text-slate-500 font-medium">
+                                        Dòng {previewRowIndex + 1} / {excelData.length}
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                        <button 
+                                            onClick={() => setPreviewRowIndex(p => Math.max(0, p - 1))}
+                                            disabled={previewRowIndex === 0}
+                                            className="p-1 rounded bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-300 disabled:opacity-30 disabled:hover:border-slate-200 transition-colors"
+                                        >
+                                            <ChevronLeft className="w-4 h-4" />
+                                        </button>
+                                        <button 
+                                            onClick={() => setPreviewRowIndex(p => Math.min(excelData.length - 1, p + 1))}
+                                            disabled={previewRowIndex === excelData.length - 1}
+                                            className="p-1 rounded bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-300 disabled:opacity-30 disabled:hover:border-slate-200 transition-colors"
+                                        >
+                                            <ChevronRight className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="flex-1 space-y-4 overflow-hidden flex flex-col">
                             <div>
                                 <label className="text-xs font-semibold text-slate-500 uppercase">Subject (Tiêu đề Thư)</label>
-                                <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium">
-                                    {templateSubject || <span className="text-slate-400 italic">Chưa phát hiện Subject từ Template...</span>}
+                                <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium break-words">
+                                    {previewMode === 'parsed' ? replacePlaceholders(templateSubject, excelData[previewRowIndex] || {}) : templateSubject || <span className="text-slate-400 italic">Chưa phát hiện Subject từ Template...</span>}
                                 </div>
                             </div>
                             
@@ -265,7 +313,7 @@ export function EmailGenerator() {
                                 <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Body HTML Preview (Nội dung Thư)</label>
                                 <div 
                                     className="flex-1 p-6 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 overflow-y-auto wysiwyg-preview"
-                                    dangerouslySetInnerHTML={{ __html: templateBody || '<span class="text-slate-400 italic">Body preview sẽ hiển thị ở đây sau khi tải Template...</span>' }}
+                                    dangerouslySetInnerHTML={{ __html: previewMode === 'parsed' ? replacePlaceholders(templateBody, excelData[previewRowIndex] || {}) : templateBody || '<span class="text-slate-400 italic">Body preview sẽ hiển thị ở đây sau khi tải Template...</span>' }}
                                 />
                             </div>
                         </div>
