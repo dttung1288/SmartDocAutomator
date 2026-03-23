@@ -4,6 +4,7 @@ import { Layout } from './components/layout/Layout';
 import { Dashboard } from './features/Dashboard';
 import { TemplateManager } from './features/TemplateManager';
 import { Generator } from './features/Generator';
+import { EmailGenerator } from './features/EmailGenerator';
 import { PlaceholderManager } from './features/PlaceholderManager';
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
           <Route path="placeholders" element={<PlaceholderManager />} />
           <Route path="templates" element={<TemplateManager />} />
           <Route path="generator" element={<Generator />} />
+          <Route path="email" element={<EmailGenerator />} />
           <Route path="settings" element={<div className="p-8">Settings - Coming Soon</div>} />
         </Route>
       </Routes>

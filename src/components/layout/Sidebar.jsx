@@ -1,12 +1,13 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, FileText, FileSignature, Settings, Database } from "lucide-react";
+import { LayoutDashboard, FileText, FileSignature, Settings, Database, Mail } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const links = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
     { name: "Placeholders", href: "/placeholders", icon: Database },
     { name: "Templates", href: "/templates", icon: FileText },
-    { name: "Generator", href: "/generator", icon: FileSignature },
+    { name: "Doc Generator", href: "/generator", icon: FileSignature },
+    { name: "Email Generator", href: "/email", icon: Mail },
     { name: "Settings", href: "/settings", icon: Settings },
 ];
 
