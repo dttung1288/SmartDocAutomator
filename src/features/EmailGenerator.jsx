@@ -35,6 +35,28 @@ export function EmailGenerator() {
     const [isDraggingExcel, setIsDraggingExcel] = useState(false);
     const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
 
+    // Helper: Ép Font Arial toàn cục (tránh bị nhảy sang Calibri mặc định của Word/Outlook)
+    const applyGlobalStyles = (htmlContent) => {
+        if (!htmlContent) return '';
+        const tags = ['p', 'span', 'td', 'th', 'li', 'div', 'b', 'strong', 'i', 'em', 'u', 'a', 'table', 'tr', 'tbody', 'thead'];
+        let styledHtml = htmlContent;
+        
+        tags.forEach(tag => {
+            // Match các thẻ mở. (?=[\s>]) đảm bảo tên thẻ kết thúc ngay lập tức (tránh <span... match vào <spanning)
+            const regex = new RegExp(`<${tag}(?=[\\s>])([^>]*)>`, 'gi');
+            styledHtml = styledHtml.replace(regex, (match, attrs) => {
+                if (attrs.toLowerCase().includes('style=')) {
+                    // Nếu đã có thuộc tính style, chèn thêm font-family vào cuối giá trị style
+                    return `<${tag}${attrs.replace(/style=(['"])(.*?)\1/i, 'style=$1$2; font-family: Arial, Helvetica, sans-serif !important;$1')}>`;
+                } else {
+                    // Nếu chưa có style, tạo style mới
+                    return `<${tag}${attrs} style="font-family: Arial, Helvetica, sans-serif !important;">`;
+                }
+            });
+        });
+        return styledHtml;
+    };
+
     // 1. Xử lý Upload Template (Word docx)
     const handleTemplateUpload = (e) => {
         const file = e.type === 'drop' ? e.dataTransfer.files[0] : e.target.files[0];
@@ -132,8 +154,12 @@ export function EmailGenerator() {
                 }
 
                 bodyHtml = bodyHtml.replace(/\n/g, '<br>');
-                // Bọc vào khung font chữ chuẩn Enterprise (Calibri/Arial)
-                bodyHtml = `<div style="font-family: 'Calibri', 'Arial', sans-serif; font-size: 11pt; color: #333333; line-height: 1.5;">${bodyHtml}</div>`;
+                
+                // Quét toàn bộ HTML và tiêm Font chữ Arial vào mọi ngóc ngách
+                bodyHtml = applyGlobalStyles(bodyHtml);
+                
+                // Bọc vào khung thẻ Div tiêu chuẩn: Định tuyến Font Size 14.5px (tương đương 11pt)
+                bodyHtml = `<div style="font-family: Arial, Helvetica, sans-serif !important; font-size: 14.5px; color: #333333; line-height: 1.5;">${bodyHtml}</div>`;
 
                 setTemplateSubject(subjectText);
                 setTemplateBody(bodyHtml);
@@ -321,9 +347,9 @@ export function EmailGenerator() {
 
                 // Nếu phRaw chứa HTML tag (ví dụ: span color), ta giữ nguyên HTML và chỉ chèn Text
                 if (phRaw !== phClean) {
-                    return phRaw.replace(phClean, value);
+                    return phRaw.replace(phClean, `<span style="font-family: Arial, Helvetica, sans-serif !important;">${value}</span>`);
                 }
-                return value;
+                return `<span style="font-family: Arial, Helvetica, sans-serif !important;">${value}</span>`;
             }
 
             return match;
