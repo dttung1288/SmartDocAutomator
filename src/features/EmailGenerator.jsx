@@ -87,7 +87,8 @@ export function EmailGenerator() {
                             
                             uniqueColors.forEach(item => {
                                 const safeText = item.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                const regex = new RegExp(`(?<!color:\\s*#[0-9a-fA-F]{6}[^>]*>)(${safeText})`, 'g');
+                                // Negative lookahead: Only replace if NOT followed by characters ending in '>' without another '<' (meaning NOT inside an HTML tag like <img src="...">)
+                                const regex = new RegExp(`(${safeText})(?![^<]*>)`, 'g');
                                 html = html.replace(regex, `<span style="color: #${item.hex};">$1</span>`);
                             });
                         }
@@ -181,11 +182,20 @@ export function EmailGenerator() {
                 const sheetJson = XLSX.utils.sheet_to_json(ws, { defval: "" });
                 if (sheetJson.length === 0) throw new Error("File Excel trống.");
 
-                const headers = Object.keys(sheetJson[0]);
-                setExcelHeaders(headers);
-                setExcelData(sheetJson);
+                // Normalize keys (trim whitespace from headers and string values to prevent matching errors)
+                const normalizedData = sheetJson.map(row => {
+                    const newRow = {};
+                    for (const key in row) {
+                        newRow[key.trim()] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+                    }
+                    return newRow;
+                });
 
-                toast.success(`Đã tải ${sheetJson.length} dòng dữ liệu.`);
+                const headers = Object.keys(normalizedData[0]);
+                setExcelHeaders(headers);
+                setExcelData(normalizedData);
+
+                toast.success(`Đã tải ${normalizedData.length} dòng dữ liệu.`);
                 // Hiển thị ngay preview cho dữ liệu khi mới upload
                 setPreviewMode('parsed');
                 setPreviewRowIndex(0);
