@@ -42,15 +42,26 @@ export function Sidebar() {
                 ))}
             </nav>
 
-            <div className="p-4 border-t border-slate-800 bg-slate-900/50">
-                <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex-shrink-0 flex items-center justify-center font-bold text-sm text-white shadow-lg border border-blue-400 border-opacity-30">
-                        DT
-                    </div>
-                    <div className="overflow-hidden">
-                        <p className="text-sm font-bold text-white truncate hover:text-blue-400 transition-colors cursor-default" title="Dương Thanh Tùng">Dương Thanh Tùng</p>
-                        <p className="text-[10.5px] text-blue-300 font-semibold truncate cursor-default" title="Quality and Operation Expert">Quality and Operation Expert</p>
-                        <p className="text-[10px] text-slate-400 truncate hover:text-slate-300 transition-colors cursor-pointer" title="tungdth88@gmail.com" onClick={() => window.location.href = 'mailto:tungdth88@gmail.com'}>tungdth88@gmail.com</p>
+            <div className="p-4 border-t border-slate-800 bg-slate-900 shadow-inner">
+                <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/60 shadow-sm relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-full blur-xl -translate-y-4 translate-x-4 group-hover:bg-blue-500/20 transition-all"></div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                        Về Tác Giả
+                    </p>
+                    <div className="flex flex-col gap-2 text-xs">
+                        <div className="flex justify-between items-center border-b border-slate-700/50 pb-1.5">
+                            <span className="text-slate-400 font-medium">Author</span>
+                            <span className="text-white font-bold drop-shadow-sm">Dương Thanh Tùng</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-slate-700/50 pb-1.5 pt-0.5">
+                            <span className="text-slate-400 font-medium">Role</span>
+                            <span className="text-blue-400 font-bold truncate max-w-[120px] drop-shadow-sm" title="Quality and Operation Expert">Quality & Operation</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-0.5">
+                            <span className="text-slate-400 font-medium">Email</span>
+                            <a href="mailto:tungdth88@gmail.com" className="text-slate-300 hover:text-blue-400 hover:underline transition-colors truncate max-w-[120px] font-medium" title="tungdth88@gmail.com">tungdth88@gmail.com</a>
+                        </div>
                     </div>
                 </div>
             </div>
