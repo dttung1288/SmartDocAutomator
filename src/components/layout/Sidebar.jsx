@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, FileText, FileSignature, Settings, Database, Mail } from "lucide-react";
+import { LayoutDashboard, FileText, FileSignature, Settings, Database, Mail, Briefcase } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const links = [
@@ -43,24 +43,40 @@ export function Sidebar() {
             </nav>
 
             <div className="p-4 border-t border-slate-800 bg-slate-900 shadow-inner">
-                <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/60 shadow-sm relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-full blur-xl -translate-y-4 translate-x-4 group-hover:bg-blue-500/20 transition-all"></div>
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                        Về Tác Giả
-                    </p>
-                    <div className="flex flex-col gap-2 text-xs">
-                        <div className="flex justify-between items-center border-b border-slate-700/50 pb-1.5">
-                            <span className="text-slate-400 font-medium">Author</span>
-                            <span className="text-white font-bold drop-shadow-sm">Dương Thanh Tùng</span>
+                <div className="bg-gradient-to-br from-slate-800 to-slate-800/50 rounded-xl p-4 border border-slate-700/50 relative overflow-hidden group hover:border-blue-500/30 transition-all duration-300">
+                    {/* Decorative background glow */}
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl -translate-y-8 translate-x-8 group-hover:bg-blue-500/20 transition-all duration-500"></div>
+                    
+                    {/* Header: Avatar + Title */}
+                    <div className="flex items-center gap-3 relative z-10 mb-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-bold text-lg text-white shadow-lg border border-blue-400/30 flex-shrink-0">
+                            DT
                         </div>
-                        <div className="flex justify-between items-center border-b border-slate-700/50 pb-1.5 pt-0.5">
-                            <span className="text-slate-400 font-medium">Role</span>
-                            <span className="text-blue-400 font-bold truncate max-w-[120px] drop-shadow-sm" title="Quality and Operation Expert">Quality & Operation</span>
+                        <div className="flex flex-col w-full overflow-hidden">
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+                                Tác Giả
+                            </p>
+                            <p className="text-[14px] font-bold text-white tracking-tight leading-tight truncate" title="Dương Thanh Tùng">Dương Thanh Tùng</p>
                         </div>
-                        <div className="flex justify-between items-center pt-0.5">
-                            <span className="text-slate-400 font-medium">Email</span>
-                            <a href="mailto:tungdth88@gmail.com" className="text-slate-300 hover:text-blue-400 hover:underline transition-colors truncate max-w-[120px] font-medium" title="tungdth88@gmail.com">tungdth88@gmail.com</a>
+                    </div>
+                    
+                    {/* Info Rows */}
+                    <div className="space-y-2 relative z-10 bg-slate-900/40 rounded-lg p-2.5 border border-slate-700/50">
+                        {/* Role */}
+                        <div className="flex items-start gap-2">
+                            <div className="mt-0.5 text-blue-400 flex-shrink-0">
+                                <Briefcase className="w-3.5 h-3.5" />
+                            </div>
+                            <p className="text-[11px] text-slate-300 font-medium leading-[1.3]">Quality and Operation Expert</p>
+                        </div>
+                        
+                        {/* Email */}
+                        <div className="flex items-center gap-2">
+                            <div className="text-emerald-400 flex-shrink-0">
+                                <Mail className="w-3.5 h-3.5" />
+                            </div>
+                            <a href="mailto:tungdth88@gmail.com" className="text-[11px] text-slate-300 hover:text-emerald-300 transition-colors font-medium truncate" title="tungdth88@gmail.com">tungdth88@gmail.com</a>
                         </div>
                     </div>
                 </div>
