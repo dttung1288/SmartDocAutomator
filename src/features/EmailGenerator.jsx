@@ -412,7 +412,7 @@ export function EmailGenerator() {
                     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4 transition-all">
                         <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
                             <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">1</span>
-                            Tải lên Template (.docx)
+                            Tải lên Email Template (.docx)
                         </h2>
                         <div 
                             className={`relative border-2 border-dashed rounded-xl p-6 text-center group cursor-pointer transition-all duration-300 ${isDraggingTemplate ? 'border-blue-500 bg-blue-50 scale-105 shadow-md' : templateFileName ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/50'}`}
@@ -441,7 +441,7 @@ export function EmailGenerator() {
                     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
                         <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
                             <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">2</span>
-                            Upload Dữ liệu (Excel)
+                            Tải lên Danh sách Email người nhận (Excel)
                         </h2>
                         <div 
                             className={`relative border-2 border-dashed rounded-xl p-6 text-center group cursor-pointer transition-all duration-300 ${isDraggingExcel ? 'border-blue-500 bg-blue-50 scale-105 shadow-md' : excelFileName ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/50'}`}
