@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { Upload, Mail, AlertTriangle, FileArchive, CheckCircle, Database, FileText, ArrowRight } from 'lucide-react';
+import { Upload, Mail, FileArchive, Database, FileText } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
 import mammoth from 'mammoth';
+import { useStore } from '../lib/store';
 
 export function EmailGenerator() {
+    // Lấy thư viện Placeholders từ hệ thống
+    const globalPlaceholders = useStore((state) => state.placeholders);
+
     const [templateHtml, setTemplateHtml] = useState('');
     const [templateSubject, setTemplateSubject] = useState('');
     const [templateBody, setTemplateBody] = useState('');
@@ -16,9 +20,6 @@ export function EmailGenerator() {
     const [excelData, setExcelData] = useState([]);
     const [excelHeaders, setExcelHeaders] = useState([]);
     const [excelFileName, setExcelFileName] = useState('');
-    
-    // Mapping: { placeholder_name: excel_header_name }
-    const [mapping, setMapping] = useState({});
 
     const [isProcessing, setIsProcessing] = useState(false);
 
@@ -37,7 +38,6 @@ export function EmailGenerator() {
                 let html = result.value;
 
                 // Tách Subject và Body từ file Word.
-                // Trình bày trong file mẫu thường là các đoạn <p>Subject:...</p> <p>Body:...</p>
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = html;
 
@@ -66,14 +66,11 @@ export function EmailGenerator() {
                     }
                 }
 
-                // Nếu không tìm thấy thẻ Subject: hay Body: rõ ràng, lấy toàn bộ làm body
                 if (!subjectText && !foundBody) {
                     bodyHtml = html;
                     subjectText = 'Email Notification'; // Default
                 }
 
-                // Nếu là file txt hoặc html thuần chỉ có chữ, \n -> <br> sẽ không cần nếu mammoth đã làm,
-                // Nhưng nếu người dùng nhập text thuần:
                 bodyHtml = bodyHtml.replace(/\n/g, '<br>');
 
                 setTemplateSubject(subjectText);
@@ -81,20 +78,11 @@ export function EmailGenerator() {
                 setTemplateHtml(html);
 
                 // Auto-detect Placeholders
-                // Dùng Regex tìm tất cả các chuỗi trong {{ }}
                 const allText = subjectText + ' ' + bodyHtml;
                 const matches = allText.match(/\{\{(.*?)\}\}/g);
                 if (matches) {
-                    // Lọc trùng lặp
                     const uniquePlaceholders = [...new Set(matches.map(m => m.replace(/[{}]/g, '').trim()))];
                     setPlaceholders(uniquePlaceholders);
-                    
-                    // Tạo mapping mặc định (Tự động map nếu tên cột Excel giống tên Placeholder)
-                    const newMapping = {};
-                    uniquePlaceholders.forEach(ph => {
-                        newMapping[ph] = ''; // Sẽ tự map lại khi có Excel
-                    });
-                    setMapping(newMapping);
                     toast.success(`Đã trích xuất ${uniquePlaceholders.length} placeholders từ Template.`);
                 } else {
                     setPlaceholders([]);
@@ -123,25 +111,12 @@ export function EmailGenerator() {
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
                 
-                // Trích xuất list headers
                 const sheetJson = XLSX.utils.sheet_to_json(ws, { defval: "" });
                 if (sheetJson.length === 0) throw new Error("File Excel trống.");
 
                 const headers = Object.keys(sheetJson[0]);
                 setExcelHeaders(headers);
                 setExcelData(sheetJson);
-
-                // Auto map: Gán header Excel vào Placeholder nếu tên giống nhau
-                setMapping(prevMap => {
-                    const newMap = { ...prevMap };
-                    Object.keys(newMap).forEach(ph => {
-                        const matchedHeader = headers.find(h => h.toLowerCase() === ph.toLowerCase());
-                        if (matchedHeader) {
-                            newMap[ph] = matchedHeader;
-                        }
-                    });
-                    return newMap;
-                });
 
                 toast.success(`Đã tải ${sheetJson.length} dòng dữ liệu.`);
             } catch (error) {
@@ -150,11 +125,6 @@ export function EmailGenerator() {
             }
         };
         reader.readAsBinaryString(file);
-    };
-
-    // Xử lý thay đổi Mapping
-    const handleMappingChange = (placeholder, excelHeader) => {
-        setMapping(prev => ({ ...prev, [placeholder]: excelHeader }));
     };
 
     // Helper: Định dạng ngày tháng sang tiếng Anh (Vd: 23/03/2026 -> March 23, 2026)
@@ -175,20 +145,23 @@ export function EmailGenerator() {
 
     // Logic thay thế dữ liệu
     const replacePlaceholders = (template, dataRow) => {
-        // Dùng replaceAll / Regex match all để thay thế mọi sự diễn ra của biến (Dù xuất hiện 3-4 lần)
         return template.replace(/\{\{(.*?)\}\}/g, (match, phRaw) => {
             const ph = phRaw.trim();
-            const mappedHeader = mapping[ph];
             
-            if (!mappedHeader) return match; // Nếu ko map, giữ nguyên text {{...}}
-
-            let value = dataRow[mappedHeader];
+            // Tìm trong Excel
+            let value = dataRow[ph];
             
-            // Xử lý Fallback: Không để undefined
-            if (value === undefined || value === null) value = '';
+            // Fallback: Tìm trong global placeholders (Thư viện) của hệ thống nếu Excel không có
+            if (value === undefined || value === null || value === '') {
+                const globalFallback = globalPlaceholders.find(p => p.name === ph);
+                if (globalFallback && globalFallback.default) {
+                    value = globalFallback.default;
+                } else {
+                    value = ''; // Nếu không có ở cả 2 nguồn thì để trống
+                }
+            }
 
             // Format cho biến English Date
-            // Ví dụ: Resolution_Date_EN
             if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && value) {
                 value = formatDateEN(value);
             }
@@ -227,7 +200,6 @@ export function EmailGenerator() {
             const zip = new JSZip();
 
             excelData.forEach((row, index) => {
-                // Ưu tiên tìm cột có chữ To, CC. Nếu không có tự động tìm trong mapping người dùng chọn
                 let to = row['To'] || row['TO'] || row['to'] || '';
                 let cc = row['CC'] || row['Cc'] || row['cc'] || '';
                 
@@ -236,7 +208,6 @@ export function EmailGenerator() {
                 
                 const emlContent = generateEML(to, cc, subject, body);
                 
-                // Tên file an toàn Unicode, hạn chế lỗi giải nén
                 let safeName = `Email_${index + 1}`;
                 if (row['CustomerName']) safeName = row['CustomerName'];
                 else if (to) safeName = to.split('@')[0];
@@ -265,18 +236,49 @@ export function EmailGenerator() {
                         <Mail className="w-6 h-6 text-blue-600" />
                         Smart Email EML Generator
                     </h1>
-                    <p className="text-slate-500 mt-1">Upload trực tiếp file Word (.docx) làm Template email để giữ nguyên định dạng phức tạp (CSS, Song ngữ).</p>
+                    <p className="text-slate-500 mt-1">Upload file Word (.docx) làm Template và kết hợp Data (Excel + Thư viện Placeholder) để tạo Email hàng loạt.</p>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Cột 1 & 2: Upload và Mapping */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Cột 1 & 2: Preview (Thiết kế rộng và chuyển sang trái) */}
                 <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full h-[80vh]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                Preview Giao Diện Email
+                            </h2>
+                            <span className="text-xs font-semibold px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-200">
+                                Phát hiện: {placeholders.length} biến
+                            </span>
+                        </div>
+                        
+                        <div className="flex-1 space-y-4 overflow-hidden flex flex-col">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase">Subject (Tiêu đề Thư)</label>
+                                <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium">
+                                    {templateSubject || <span className="text-slate-400 italic">Chưa phát hiện Subject từ Template...</span>}
+                                </div>
+                            </div>
+                            
+                            <div className="flex-1 flex flex-col min-h-0">
+                                <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Body HTML Preview (Nội dung Thư)</label>
+                                <div 
+                                    className="flex-1 p-6 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 overflow-y-auto wysiwyg-preview"
+                                    dangerouslySetInnerHTML={{ __html: templateBody || '<span class="text-slate-400 italic">Body preview sẽ hiển thị ở đây sau khi tải Template...</span>' }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Cột 3: Upload và Chức năng (Chuyển sang phải) */}
+                <div className="space-y-6">
                     {/* BƯỚC 1: UPLOAD TEMPLATE */}
                     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
                         <h2 className="text-lg font-semibold flex items-center gap-2">
                             <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">1</span>
-                            Upload Template (Word .docx)
+                            Upload Template (.docx)
                         </h2>
                         <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-6 hover:bg-slate-50 transition-colors text-center group cursor-pointer">
                             <input
@@ -287,10 +289,7 @@ export function EmailGenerator() {
                             />
                             <FileText className="w-8 h-8 text-slate-400 group-hover:text-blue-500 mx-auto mb-2 transition-colors" />
                             <p className="text-sm font-medium text-slate-700">
-                                {templateFileName ? templateFileName : 'Click hoặc Kéo thả file .docx mẫu'}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-1">
-                                Chuẩn cấu trúc: Phải có chữ "Subject:" và "Body:" để phân tách.
+                                {templateFileName ? templateFileName : 'Chọn file Word (.docx) mẫu'}
                             </p>
                         </div>
                     </div>
@@ -310,88 +309,32 @@ export function EmailGenerator() {
                             />
                             <Database className="w-8 h-8 text-slate-400 group-hover:text-blue-500 mx-auto mb-2 transition-colors" />
                             <p className="text-sm font-medium text-slate-700">
-                                {excelFileName ? excelFileName : 'Click hoặc Kéo thả file Excel list'}
+                                {excelFileName ? excelFileName : 'Chọn file Excel người nhận'}
                             </p>
                         </div>
                     </div>
 
-                    {/* BƯỚC 3: MAPPING */}
-                    {placeholders.length > 0 && excelHeaders.length > 0 && (
-                        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                            <h2 className="text-lg font-semibold flex items-center gap-2">
-                                <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">3</span>
-                                Map Dữ Liệu (So khớp cột)
-                            </h2>
-                            <p className="text-sm text-slate-500">Ghép các biến trong File Word với các cột tương ứng trong File Excel.</p>
-                            
-                            <div className="space-y-3 mt-4 border rounded-lg p-4 bg-slate-50">
-                                {placeholders.map((ph, idx) => (
-                                    <div key={idx} className="flex items-center gap-4">
-                                        <div className="w-1/2 flex items-center gap-2">
-                                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded font-mono text-sm border border-blue-200">{`{{${ph}}}`}</span>
-                                        </div>
-                                        <ArrowRight className="w-4 h-4 text-slate-400" />
-                                        <div className="w-1/2">
-                                            <select
-                                                value={mapping[ph] || ""}
-                                                onChange={(e) => handleMappingChange(ph, e.target.value)}
-                                                className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500"
-                                            >
-                                                <option value="">-- Bỏ trống (Fallback) --</option>
-                                                {excelHeaders.map(header => (
-                                                    <option key={header} value={header}>{header}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Cột 3: Preview & Nút Generate */}
-                <div className="space-y-6">
-                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
+                    {/* BƯỚC 3: NÚT GENERATE */}
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                         <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                            Preview Chữ (Phát hiện)
+                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">3</span>
+                            Tạo Bản Nháp Email
                         </h2>
-                        
-                        <div className="flex-1 space-y-4">
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500 uppercase">Subject</label>
-                                <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium">
-                                    {templateSubject || <span className="text-slate-400 italic">Chưa phát hiện Subject...</span>}
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label className="text-xs font-semibold text-slate-500 uppercase">Body HTML Preview</label>
-                                <div 
-                                    className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 overflow-y-auto"
-                                    style={{ maxHeight: '350px' }}
-                                    dangerouslySetInnerHTML={{ __html: templateBody || '<span class="text-slate-400 italic">Chưa tải Word Template...</span>' }}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="pt-6 mt-6 border-t border-slate-100">
-                            <button
-                                onClick={handleGenerate}
-                                disabled={isProcessing || excelData.length === 0 || placeholders.length === 0}
-                                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isProcessing ? (
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                ) : (
-                                    <FileArchive className="w-5 h-5" />
-                                )}
-                                {isProcessing ? 'Đang tạo...' : 'Tạo hàng loạt EML (ZIP)'}
-                            </button>
-                            <p className="text-xs text-center text-slate-500 mt-2">
-                                Tất cả file EML sẽ được đóng gói dưới dạng ZIP để dễ tải xuống một lần duy nhất.
-                            </p>
-                        </div>
+                        <button
+                            onClick={handleGenerate}
+                            disabled={isProcessing || excelData.length === 0 || placeholders.length === 0}
+                            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isProcessing ? (
+                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                                <FileArchive className="w-5 h-5" />
+                            )}
+                            {isProcessing ? 'Đang tạo...' : 'Tải Xuống Hàng Loạt (.zip)'}
+                        </button>
+                        <p className="text-xs text-center text-slate-500 mt-3">
+                            Lưu ý: Các biến không tìm thấy trong Excel sẽ tự động được lấy từ <strong>Placeholder Dictionary</strong>.
+                        </p>
                     </div>
                 </div>
             </div>
