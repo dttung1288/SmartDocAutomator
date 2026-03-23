@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Mail, FileArchive, Database, FileText, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { Upload, Mail, FileArchive, Database, FileText, ChevronLeft, ChevronRight, Eye, CheckCircle, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -22,14 +22,26 @@ export function EmailGenerator() {
     const [excelFileName, setExcelFileName] = useState('');
 
     const [isProcessing, setIsProcessing] = useState(false);
+    const [progress, setProgress] = useState(0); // 0 to 100
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    
     const [previewMode, setPreviewMode] = useState('raw'); // 'raw' | 'parsed'
     const [previewRowIndex, setPreviewRowIndex] = useState(0);
 
+    // Drag & Drop State
+    const [isDraggingTemplate, setIsDraggingTemplate] = useState(false);
+    const [isDraggingExcel, setIsDraggingExcel] = useState(false);
+
     // 1. Xử lý Upload Template (Word docx)
     const handleTemplateUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const file = e.type === 'drop' ? e.dataTransfer.files[0] : e.target.files[0];
+        if (!file) {
+            setIsDraggingTemplate(false);
+            return;
+        }
+        setIsDraggingTemplate(false);
         setTemplateFileName(file.name);
+        setIsAnalyzing(true);
 
         const reader = new FileReader();
         reader.onload = async (event) => {
@@ -94,6 +106,8 @@ export function EmailGenerator() {
             } catch (error) {
                 console.error(error);
                 toast.error('Lỗi khi đọc file Template Word.');
+            } finally {
+                setIsAnalyzing(false);
             }
         };
         reader.readAsArrayBuffer(file);
@@ -101,8 +115,12 @@ export function EmailGenerator() {
 
     // 2. Xử lý Upload Excel Dữ liệu
     const handleExcelUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        const file = e.type === 'drop' ? e.dataTransfer.files[0] : e.target.files[0];
+        if (!file) {
+            setIsDraggingExcel(false);
+            return;
+        }
+        setIsDraggingExcel(false);
         setExcelFileName(file.name);
 
         const reader = new FileReader();
@@ -166,6 +184,11 @@ export function EmailGenerator() {
                 }
             }
 
+            // Error Highlight
+            if (value === '' && previewMode === 'parsed') {
+                return `<span style="background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 0.85em; border: 1px solid #fca5a5; display: inline-flex; align-items: center; gap: 4px;" title="Lỗi: Chưa định nghĩa giá trị này">⚠️ {{${ph}}}</span>`;
+            }
+
             // Format cho biến English Date
             if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && value) {
                 value = formatDateEN(value);
@@ -199,32 +222,72 @@ export function EmailGenerator() {
         }
 
         setIsProcessing(true);
-        toast.info('Đang xử lý tạo file EML...');
+        setProgress(0);
+        toast.info('Đang bắt đầu tạo file EML...');
 
         try {
             const zip = new JSZip();
 
-            excelData.forEach((row, index) => {
+            // Sử dụng setImmediate (hoặc setTimeout) để nhường luồng xử lý cho UI render ProgressBar
+            for (let i = 0; i < excelData.length; i++) {
+                const row = excelData[i];
                 let to = row['To'] || row['TO'] || row['to'] || '';
                 let cc = row['CC'] || row['Cc'] || row['cc'] || '';
                 
-                const subject = replacePlaceholders(templateSubject, row);
-                const body = replacePlaceholders(templateBody, row);
+                // Khi tạo file thật thì chúng ta tạm set fallback highlight red = false (bằng cách truyền param hoặc giả lập)
+                // Tuy nhiên hiện hàm replace không truyền chế độ, nên ta bọc mode parse để không inject html đỏ
+                const backupMode = previewMode;
+                
+                // Tính toán subject body
+                // Ở đây ta dùng hàm replace, nhưng nếu không có thì để nguyên chữ \{\{..\}\} trong file Word thay vì HTML
+                const subject = templateSubject.replace(/\{\{(.*?)\}\}/g, (match, phRaw) => {
+                    const ph = phRaw.trim();
+                    let val = row[ph];
+                    if (val === undefined || val === null || val === '') {
+                        const fall = globalPlaceholders.find(p => p.name === ph);
+                        if (fall && fall.default) val = fall.default;
+                        else val = match; // fallback: leave unchanged if empty
+                    }
+                    if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && val && val !== match) {
+                        val = formatDateEN(val);
+                    }
+                    return val;
+                });
+
+                const body = templateBody.replace(/\{\{(.*?)\}\}/g, (match, phRaw) => {
+                    const ph = phRaw.trim();
+                    let val = row[ph];
+                    if (val === undefined || val === null || val === '') {
+                        const fall = globalPlaceholders.find(p => p.name === ph);
+                        if (fall && fall.default) val = fall.default;
+                        else val = match;
+                    }
+                    if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && val && val !== match) {
+                        val = formatDateEN(val);
+                    }
+                    return val;
+                });
                 
                 const emlContent = generateEML(to, cc, subject, body);
                 
-                let safeName = `Email_${index + 1}`;
+                let safeName = `Email_${i + 1}`;
                 if (row['CustomerName']) safeName = row['CustomerName'];
                 else if (to) safeName = to.split('@')[0];
                 
                 safeName = safeName.toString().replace(/[^a-z0-9_\u00C0-\u017F]/gi, '_');
                 
                 zip.file(`${safeName}.eml`, emlContent);
-            });
+
+                // Cập nhật progress cứ mỗi 10 rows hoặc dòng cuối
+                if (i % 10 === 0 || i === excelData.length - 1) {
+                    setProgress(Math.round(((i + 1) / excelData.length) * 100));
+                    await new Promise(r => setTimeout(r, 0)); // Yield to main thread
+                }
+            }
 
             const zipBlob = await zip.generateAsync({ type: 'blob' });
             saveAs(zipBlob, 'Email_Drafts.zip');
-            toast.success(`Đã tạo thành công ${excelData.length} file EML!`);
+            toast.success(`Đã đóng gói thành công ${excelData.length} file EML!`);
         } catch (error) {
             console.error(error);
             toast.error('Có lỗi xảy ra khi tạo EML!');
@@ -301,19 +364,42 @@ export function EmailGenerator() {
                             )}
                         </div>
 
-                        <div className="flex-1 space-y-4 overflow-hidden flex flex-col">
+                        <div className="flex-1 space-y-4 overflow-hidden flex flex-col relative">
+                            {isAnalyzing ? (
+                                <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center p-6 text-center rounded-lg">
+                                    <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4" />
+                                    <h3 className="font-semibold text-slate-800">Đang phân tích Template...</h3>
+                                    <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">Hệ thống đang bóc tách thẻ HTML và nhận diện các biến dữ liệu thông minh.</p>
+                                </div>
+                            ) : templateBody === '' && (
+                                <div className="absolute inset-0 bg-slate-50/50 backdrop-blur-[1px] z-10 flex flex-col items-center justify-center p-6 text-center border-2 border-dashed border-slate-200 rounded-lg">
+                                    <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4">
+                                        <FileText className="w-8 h-8 opacity-70" />
+                                    </div>
+                                    <h3 className="font-semibold text-slate-800">Chưa tải Template</h3>
+                                    <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Vui lòng tải lên file Template Word (Bước 1) để xem trước cấu trúc Email.</p>
+                                </div>
+                            )}
+                            
                             <div>
-                                <label className="text-xs font-semibold text-slate-500 uppercase">Subject (Tiêu đề Thư)</label>
-                                <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium break-words">
-                                    {previewMode === 'parsed' ? replacePlaceholders(templateSubject, excelData[previewRowIndex] || {}) : templateSubject || <span className="text-slate-400 italic">Chưa phát hiện Subject từ Template...</span>}
+                                <label className="text-xs font-semibold text-slate-500 uppercase flex justify-between items-center">
+                                    <span>Subject (Tiêu đề Thư)</span>
+                                    {previewMode === 'parsed' && templateSubject && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">Live Map</span>}
+                                </label>
+                                <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium break-words shadow-inner min-h-[42px]">
+                                    {previewMode === 'parsed' ? (
+                                        <div dangerouslySetInnerHTML={{ __html: replacePlaceholders(templateSubject, excelData[previewRowIndex] || {}) }} />
+                                    ) : (
+                                        templateSubject || <span className="text-slate-400 italic">...</span>
+                                    )}
                                 </div>
                             </div>
                             
                             <div className="flex-1 flex flex-col min-h-0">
                                 <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Body HTML Preview (Nội dung Thư)</label>
                                 <div 
-                                    className="flex-1 p-6 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 overflow-y-auto wysiwyg-preview"
-                                    dangerouslySetInnerHTML={{ __html: previewMode === 'parsed' ? replacePlaceholders(templateBody, excelData[previewRowIndex] || {}) : templateBody || '<span class="text-slate-400 italic">Body preview sẽ hiển thị ở đây sau khi tải Template...</span>' }}
+                                    className="flex-1 p-6 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 overflow-y-auto wysiwyg-preview shadow-inner"
+                                    dangerouslySetInnerHTML={{ __html: previewMode === 'parsed' ? replacePlaceholders(templateBody, excelData[previewRowIndex] || {}) : templateBody }}
                                 />
                             </div>
                         </div>
@@ -323,65 +409,102 @@ export function EmailGenerator() {
                 {/* Cột 3: Upload và Chức năng (Chuyển sang phải) */}
                 <div className="space-y-6">
                     {/* BƯỚC 1: UPLOAD TEMPLATE */}
-                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                        <h2 className="text-lg font-semibold flex items-center gap-2">
-                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">1</span>
-                            Upload Template (.docx)
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4 transition-all">
+                        <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">1</span>
+                            Tải lên Template (.docx)
                         </h2>
-                        <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-6 hover:bg-slate-50 transition-colors text-center group cursor-pointer">
+                        <div 
+                            className={`relative border-2 border-dashed rounded-xl p-6 text-center group cursor-pointer transition-all duration-300 ${isDraggingTemplate ? 'border-blue-500 bg-blue-50 scale-105 shadow-md' : templateFileName ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/50'}`}
+                            onDragOver={(e) => { e.preventDefault(); setIsDraggingTemplate(true); }}
+                            onDragLeave={() => setIsDraggingTemplate(false)}
+                            onDrop={(e) => { e.preventDefault(); handleTemplateUpload(e); }}
+                        >
                             <input
                                 type="file"
                                 accept=".docx"
                                 onChange={handleTemplateUpload}
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                             />
-                            <FileText className="w-8 h-8 text-slate-400 group-hover:text-blue-500 mx-auto mb-2 transition-colors" />
-                            <p className="text-sm font-medium text-slate-700">
-                                {templateFileName ? templateFileName : 'Chọn file Word (.docx) mẫu'}
+                            {templateFileName ? (
+                                <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2 drop-shadow-sm" />
+                            ) : (
+                                <FileText className={`w-8 h-8 mx-auto mb-2 transition-colors ${isDraggingTemplate ? 'text-blue-600' : 'text-slate-400 group-hover:text-blue-500'}`} />
+                            )}
+                            <p className={`text-sm font-medium ${templateFileName ? 'text-emerald-700' : 'text-slate-700 group-hover:text-blue-700'}`}>
+                                {templateFileName ? templateFileName : isDraggingTemplate ? 'Thả file vào đây!' : 'Kéo thả hoặc click chọn file mẫu Word'}
                             </p>
                         </div>
                     </div>
 
                     {/* BƯỚC 2: UPLOAD DATA EXCEL */}
                     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                        <h2 className="text-lg font-semibold flex items-center gap-2">
-                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">2</span>
+                        <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">2</span>
                             Upload Dữ liệu (Excel)
                         </h2>
-                        <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-6 hover:bg-slate-50 transition-colors text-center group cursor-pointer">
+                        <div 
+                            className={`relative border-2 border-dashed rounded-xl p-6 text-center group cursor-pointer transition-all duration-300 ${isDraggingExcel ? 'border-blue-500 bg-blue-50 scale-105 shadow-md' : excelFileName ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/50'}`}
+                            onDragOver={(e) => { e.preventDefault(); setIsDraggingExcel(true); }}
+                            onDragLeave={() => setIsDraggingExcel(false)}
+                            onDrop={(e) => { e.preventDefault(); handleExcelUpload(e); }}
+                        >
                             <input
                                 type="file"
                                 accept=".xlsx, .xls, .csv"
                                 onChange={handleExcelUpload}
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                             />
-                            <Database className="w-8 h-8 text-slate-400 group-hover:text-blue-500 mx-auto mb-2 transition-colors" />
-                            <p className="text-sm font-medium text-slate-700">
-                                {excelFileName ? excelFileName : 'Chọn file Excel người nhận'}
+                            {excelFileName ? (
+                                <Database className="w-8 h-8 text-emerald-500 mx-auto mb-2 drop-shadow-sm" />
+                            ) : (
+                                <Database className={`w-8 h-8 mx-auto mb-2 transition-colors ${isDraggingExcel ? 'text-blue-600' : 'text-slate-400 group-hover:text-blue-500'}`} />
+                            )}
+                            <p className={`text-sm font-medium ${excelFileName ? 'text-emerald-700' : 'text-slate-700 group-hover:text-blue-700'}`}>
+                                {excelFileName ? excelFileName : isDraggingExcel ? 'Thả Data Excel vào đây!' : 'Kéo thả hoặc click file Excel thông tin người nhận'}
                             </p>
                         </div>
                     </div>
 
-                    {/* BƯỚC 3: NÚT GENERATE */}
-                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                        <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">3</span>
-                            Tạo Bản Nháp Email
+                    {/* BƯỚC 3: NÚT GENERATE (FITTS LAW) */}
+                    <div className="bg-gradient-to-br from-white to-blue-50/30 p-6 rounded-xl border border-blue-100 shadow-lg shadow-blue-900/5 relative overflow-hidden">
+                        {isProcessing && (
+                            <div className="absolute top-0 left-0 w-full bg-blue-100 h-1">
+                                <div className="bg-blue-600 h-1 transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                            </div>
+                        )}
+                        <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
+                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">3</span>
+                            Duyệt Bản Nháp & Xuất File
                         </h2>
+                        
                         <button
                             onClick={handleGenerate}
                             disabled={isProcessing || excelData.length === 0 || placeholders.length === 0}
-                            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            className={`w-full flex flex-col items-center justify-center gap-1 font-bold py-5 px-6 rounded-xl shadow-xl transition-all duration-300 border-b-4 
+                                ${isProcessing || excelData.length === 0 || placeholders.length === 0 
+                                ? 'bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed' 
+                                : 'bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-blue-600/30 text-white border-blue-800'}`}
                         >
-                            {isProcessing ? (
-                                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                                <FileArchive className="w-5 h-5" />
-                            )}
-                            {isProcessing ? 'Đang tạo...' : 'Tải Xuống Hàng Loạt (.zip)'}
+                            <div className="flex items-center gap-2 text-xl">
+                                {isProcessing ? (
+                                    <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <FileArchive className="w-6 h-6 drop-shadow-md" />
+                                )}
+                                {isProcessing ? (
+                                    <span>Đang xuất {progress}%...</span>
+                                ) : (
+                                    <span>TẢI XUỐNG HÀNG LOẠT (.ZIP)</span>
+                                )}
+                            </div>
+                            <span className="text-xs font-medium opacity-80">
+                                {isProcessing ? `Đang xử lý ${excelData.length} mẫu thư` : 'Tất cả file định dạng EML kèm định dạng'}
+                            </span>
                         </button>
-                        <p className="text-xs text-center text-slate-500 mt-3">
-                            Lưu ý: Các biến không tìm thấy trong Excel sẽ tự động được lấy từ <strong>Placeholder Dictionary</strong>.
+                        
+                        <p className="text-xs text-center text-slate-500 mt-4 px-2 tracking-tight">
+                            Hệ thống sẽ thay giá trị từ Excel vào Template. Nếu <strong>Placeholder mồ côi</strong>, giá trị tự lưu từ Dictionary sẽ được bù vào.
                         </p>
                     </div>
                 </div>
