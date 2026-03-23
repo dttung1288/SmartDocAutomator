@@ -1,0 +1,25 @@
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Layout } from './components/layout/Layout';
+import { Dashboard } from './features/Dashboard';
+import { TemplateManager } from './features/TemplateManager';
+import { Generator } from './features/Generator';
+import { PlaceholderManager } from './features/PlaceholderManager';
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="placeholders" element={<PlaceholderManager />} />
+          <Route path="templates" element={<TemplateManager />} />
+          <Route path="generator" element={<Generator />} />
+          <Route path="settings" element={<div className="p-8">Settings - Coming Soon</div>} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
