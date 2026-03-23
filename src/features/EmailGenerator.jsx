@@ -208,11 +208,12 @@ export function EmailGenerator() {
                 const sheetJson = XLSX.utils.sheet_to_json(ws, { defval: "" });
                 if (sheetJson.length === 0) throw new Error("File Excel trống.");
 
-                // Normalize keys (trim whitespace from headers and string values to prevent matching errors)
+                // Normalize keys (trim whitespace and zero-width chars from headers and string values to prevent matching errors)
                 const normalizedData = sheetJson.map(row => {
                     const newRow = {};
                     for (const key in row) {
-                        newRow[key.trim()] = typeof row[key] === 'string' ? row[key].trim() : row[key];
+                        let cleanKey = key.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+                        newRow[cleanKey] = typeof row[key] === 'string' ? row[key].replace(/[\u200B-\u200D\uFEFF]/g, '').trim() : row[key];
                     }
                     return newRow;
                 });
@@ -313,20 +314,45 @@ export function EmailGenerator() {
         return str.trim();
     };
 
-    // Logic thay thế dữ liệu
+    // Logic thay thế dữ liệu siêu dẻo dai (Fuzzy Match & Tag Preserver)
     const replacePlaceholders = (template, dataRow, isLivePreview = true) => {
         return template.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
             const phRaw = ph1 !== undefined ? ph1 : (ph2 !== undefined ? ph2 : '');
             
-            // Xóa thẻ HTML (do Color Parser vô tình add vào) & space ẩn
-            const phClean = phRaw.replace(/<\/?[^>]+(>|$)/g, "").replace(/&nbsp;/g, ' ').trim();
+            // Xóa thẻ HTML bằng DOM để lấy pure text chính xác tuyệt đối (xử lý cả entity như &nbsp;)
+            const tmpDiv = document.createElement("div");
+            tmpDiv.innerHTML = phRaw;
+            let phClean = tmpDiv.textContent || tmpDiv.innerText || "";
+            // Xóa zero-width space, chuẩn hoá non-breaking spaces và khoảng trắng
+            phClean = phClean.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' ').trim();
             
-            // Tìm trong Excel
+            // 1. Tìm chuẩn xác trong Excel
             let value = dataRow[phClean];
             
-            // Fallback: Tìm trong global placeholders
+            // 2. Fuzzy Find (Ưu tiên tệp rác bị dư khoảng trắng, hoa thường)
             if (value === undefined || value === null || value === '') {
-                const globalFallback = globalPlaceholders.find(p => p.name === phClean);
+                const looseTarget = phClean.toLowerCase().replace(/\s+/g, '');
+                const looseKey = Object.keys(dataRow).find(
+                    k => k.toLowerCase().replace(/\s+/g, '') === looseTarget
+                );
+                if (looseKey) value = dataRow[looseKey];
+            }
+
+            // 3. Giải cứu lỗi chính tả "Recepient" vs "Recipient" kinh điển của file Excel thực tế
+            if (value === undefined || value === null || value === '') {
+                const cleanLower = phClean.toLowerCase();
+                if (cleanLower.includes('recepient') || cleanLower.includes('recipient')) {
+                    const altKey = Object.keys(dataRow).find(k => {
+                        const kl = k.toLowerCase();
+                        return kl.includes('recepient name') || kl.includes('recipient name') || kl.includes('name');
+                    });
+                    if (altKey) value = dataRow[altKey];
+                }
+            }
+            
+            // 4. Fallback: Tìm trong Thư viện Global
+            if (value === undefined || value === null || value === '') {
+                const globalFallback = globalPlaceholders.find(p => p.name.toLowerCase() === phClean.toLowerCase());
                 if (globalFallback && globalFallback.default) {
                     value = globalFallback.default;
                 } else {
@@ -336,7 +362,7 @@ export function EmailGenerator() {
 
             // Error Highlight
             if (value === '' && isLivePreview) {
-                return `<span style="background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 0.85em; border: 1px solid #fca5a5; display: inline-flex; align-items: center; gap: 4px;" title="Lỗi: Chưa định nghĩa giá trị này">⚠️ ${match}</span>`;
+                return `<span style="background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 0.85em; border: 1px solid #fca5a5; display: inline-flex; align-items: center; gap: 4px;" title="Lỗi: ${phClean} (Không tìm thấy trên Excel)">⚠️ ${match}</span>`;
             }
 
             if (value !== '') {
@@ -345,11 +371,18 @@ export function EmailGenerator() {
                     value = formatDateEN(value);
                 }
 
-                // Nếu phRaw chứa HTML tag (ví dụ: span color), ta giữ nguyên HTML và chỉ chèn Text
+                const valueHtml = `<span style="font-family: Arial, Helvetica, sans-serif !important;">${value}</span>`;
+
+                // Nếu phRaw chứa HTML tag (ví dụ: span color), thử nhúng value vào giữa để giữ Style màu
                 if (phRaw !== phClean) {
-                    return phRaw.replace(phClean, `<span style="font-family: Arial, Helvetica, sans-serif !important;">${value}</span>`);
+                    if (phRaw.includes(phClean)) {
+                        return phRaw.replace(phClean, valueHtml);
+                    } else {
+                        // Tránh hỏng chuỗi HTML, nếu không chèn được thì ghi đè toàn bộ
+                        return valueHtml;
+                    }
                 }
-                return `<span style="font-family: Arial, Helvetica, sans-serif !important;">${value}</span>`;
+                return valueHtml;
             }
 
             return match;
