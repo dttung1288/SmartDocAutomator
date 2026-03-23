@@ -288,35 +288,45 @@ export function EmailGenerator() {
     };
 
     // Logic thay thế dữ liệu
-    const replacePlaceholders = (template, dataRow) => {
+    const replacePlaceholders = (template, dataRow, isLivePreview = true) => {
         return template.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
-            const phRaw = ph1 || ph2 || '';
-            const ph = phRaw.trim();
+            const phRaw = ph1 !== undefined ? ph1 : (ph2 !== undefined ? ph2 : '');
+            
+            // Xóa thẻ HTML (do Color Parser vô tình add vào) & space ẩn
+            const phClean = phRaw.replace(/<\/?[^>]+(>|$)/g, "").replace(/&nbsp;/g, ' ').trim();
             
             // Tìm trong Excel
-            let value = dataRow[ph];
+            let value = dataRow[phClean];
             
-            // Fallback: Tìm trong global placeholders (Thư viện) của hệ thống nếu Excel không có
+            // Fallback: Tìm trong global placeholders
             if (value === undefined || value === null || value === '') {
-                const globalFallback = globalPlaceholders.find(p => p.name === ph);
+                const globalFallback = globalPlaceholders.find(p => p.name === phClean);
                 if (globalFallback && globalFallback.default) {
                     value = globalFallback.default;
                 } else {
-                    value = ''; // Nếu không có ở cả 2 nguồn thì để trống
+                    value = ''; // Trống hoàn toàn
                 }
             }
 
             // Error Highlight
-            if (value === '' && previewMode === 'parsed') {
+            if (value === '' && isLivePreview) {
                 return `<span style="background-color: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 0.85em; border: 1px solid #fca5a5; display: inline-flex; align-items: center; gap: 4px;" title="Lỗi: Chưa định nghĩa giá trị này">⚠️ ${match}</span>`;
             }
 
-            // Format cho biến English Date
-            if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && value) {
-                value = formatDateEN(value);
+            if (value !== '') {
+                // Format cho biến English Date
+                if (phClean.endsWith('_EN') && phClean.toLowerCase().includes('date')) {
+                    value = formatDateEN(value);
+                }
+
+                // Nếu phRaw chứa HTML tag (ví dụ: span color), ta giữ nguyên HTML và chỉ chèn Text
+                if (phRaw !== phClean) {
+                    return phRaw.replace(phClean, value);
+                }
+                return value;
             }
 
-            return value;
+            return match;
         });
     };
 
@@ -392,36 +402,8 @@ export function EmailGenerator() {
                 const backupMode = previewMode;
                 
                 // Tính toán subject body
-                // Ở đây ta dùng hàm replace, hỗ trợ cả {{}} và [[]], nhưng nếu không có thì để nguyên thay vì sinh HTML
-                const subject = templateSubject.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
-                    const phRaw = ph1 || ph2 || '';
-                    const ph = phRaw.trim();
-                    let val = row[ph];
-                    if (val === undefined || val === null || val === '') {
-                        const fall = globalPlaceholders.find(p => p.name === ph);
-                        if (fall && fall.default) val = fall.default;
-                        else val = match; // fallback: leave unchanged if empty
-                    }
-                    if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && val && val !== match) {
-                        val = formatDateEN(val);
-                    }
-                    return val;
-                });
-
-                const body = templateBody.replace(/\{\{(.*?)\}\}|\[\[(.*?)\]\]/g, (match, ph1, ph2) => {
-                    const phRaw = ph1 || ph2 || '';
-                    const ph = phRaw.trim();
-                    let val = row[ph];
-                    if (val === undefined || val === null || val === '') {
-                        const fall = globalPlaceholders.find(p => p.name === ph);
-                        if (fall && fall.default) val = fall.default;
-                        else val = match;
-                    }
-                    if (ph.endsWith('_EN') && ph.toLowerCase().includes('date') && val && val !== match) {
-                        val = formatDateEN(val);
-                    }
-                    return val;
-                });
+                const subject = replacePlaceholders(templateSubject, row, false);
+                const body = replacePlaceholders(templateBody, row, false);
                 
                 const emlContent = buildMimeMessage(from, to, cc, subject, body, attachments);
                 
@@ -543,7 +525,7 @@ export function EmailGenerator() {
                                 </label>
                                 <div className="mt-1 p-3 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 font-medium break-words shadow-inner min-h-[42px]">
                                     {previewMode === 'parsed' ? (
-                                        <div dangerouslySetInnerHTML={{ __html: replacePlaceholders(templateSubject, excelData[previewRowIndex] || {}) }} />
+                                        <div dangerouslySetInnerHTML={{ __html: replacePlaceholders(templateSubject, excelData[previewRowIndex] || {}, true) }} />
                                     ) : (
                                         templateSubject || <span className="text-slate-400 italic">...</span>
                                     )}
@@ -554,7 +536,7 @@ export function EmailGenerator() {
                                 <label className="text-xs font-semibold text-slate-500 uppercase mb-1">Body HTML Preview (Nội dung Thư)</label>
                                 <div 
                                     className="flex-1 p-6 bg-slate-50 border border-slate-200 rounded text-sm text-slate-800 overflow-y-auto wysiwyg-preview shadow-inner"
-                                    dangerouslySetInnerHTML={{ __html: previewMode === 'parsed' ? replacePlaceholders(templateBody, excelData[previewRowIndex] || {}) : templateBody }}
+                                    dangerouslySetInnerHTML={{ __html: previewMode === 'parsed' ? replacePlaceholders(templateBody, excelData[previewRowIndex] || {}, true) : templateBody }}
                                 />
                             </div>
                         </div>
