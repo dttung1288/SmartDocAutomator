@@ -42,14 +42,15 @@ export function Sidebar() {
                 ))}
             </nav>
 
-            <div className="p-4 border-t border-slate-800">
+            <div className="p-4 border-t border-slate-800 bg-slate-900/50">
                 <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold text-sm">
-                        AD
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex-shrink-0 flex items-center justify-center font-bold text-sm text-white shadow-lg border border-blue-400 border-opacity-30">
+                        DT
                     </div>
-                    <div>
-                        <p className="text-sm font-medium">Admin User</p>
-                        <p className="text-xs text-slate-400">admin@enterprise.com</p>
+                    <div className="overflow-hidden">
+                        <p className="text-sm font-bold text-white truncate hover:text-blue-400 transition-colors cursor-default" title="Dương Thanh Tùng">Dương Thanh Tùng</p>
+                        <p className="text-[10.5px] text-blue-300 font-semibold truncate cursor-default" title="Quality and Operation Expert">Quality and Operation Expert</p>
+                        <p className="text-[10px] text-slate-400 truncate hover:text-slate-300 transition-colors cursor-pointer" title="tungdth88@gmail.com" onClick={() => window.location.href = 'mailto:tungdth88@gmail.com'}>tungdth88@gmail.com</p>
                     </div>
                 </div>
             </div>
