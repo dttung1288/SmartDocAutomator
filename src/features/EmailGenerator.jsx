@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Mail, FileArchive, Database, FileText, ChevronLeft, ChevronRight, Eye, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, Mail, FileArchive, Database, FileText, ChevronLeft, ChevronRight, Eye, CheckCircle, AlertCircle, Paperclip, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -28,9 +28,12 @@ export function EmailGenerator() {
     const [previewMode, setPreviewMode] = useState('raw'); // 'raw' | 'parsed'
     const [previewRowIndex, setPreviewRowIndex] = useState(0);
 
+    const [attachments, setAttachments] = useState([]);
+    
     // Drag & Drop State
     const [isDraggingTemplate, setIsDraggingTemplate] = useState(false);
     const [isDraggingExcel, setIsDraggingExcel] = useState(false);
+    const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
 
     // 1. Xử lý Upload Template (Word docx)
     const handleTemplateUpload = (e) => {
@@ -50,6 +53,48 @@ export function EmailGenerator() {
                 // Convert Word to HTML
                 const result = await mammoth.convertToHtml({ arrayBuffer });
                 let html = result.value;
+
+                // Color extractor hack: đọc từ word/document.xml và inject <span> màu
+                try {
+                    const zip = await JSZip.loadAsync(arrayBuffer);
+                    const docXmlFile = zip.file("word/document.xml");
+                    if (docXmlFile) {
+                        const docXml = await docXmlFile.async("text");
+                        const runs = docXml.match(/<w:r\b[^>]*>.*?<\/w:r>/gs);
+                        if (runs) {
+                            let colorMap = [];
+                            runs.forEach(run => {
+                                const colorMatch = run.match(/<w:color w:val="([0-9A-Fa-f]{6})"/);
+                                const textMatch = run.match(/<w:t(?:[^>]*)?>(.*?)<\/w:t>/);
+                                if (colorMatch && textMatch) {
+                                    const text = textMatch[1].trim();
+                                    if (text.length >= 2) {
+                                        colorMap.push({ text, hex: colorMatch[1] });
+                                    }
+                                }
+                            });
+                            // unique & sort
+                            const uniqueColors = [];
+                            const seen = new Set();
+                            colorMap.forEach(item => {
+                                const key = item.hex + item.text;
+                                if (!seen.has(key)) {
+                                    seen.add(key);
+                                    uniqueColors.push(item);
+                                }
+                            });
+                            uniqueColors.sort((a, b) => b.text.length - a.text.length);
+                            
+                            uniqueColors.forEach(item => {
+                                const safeText = item.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                const regex = new RegExp(`(?<!color:\\s*#[0-9a-fA-F]{6}[^>]*>)(${safeText})`, 'g');
+                                html = html.replace(regex, `<span style="color: #${item.hex};">$1</span>`);
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.log("Color extraction skipped", e);
+                }
 
                 // Tách Subject và Body từ file Word.
                 const tempDiv = document.createElement('div');
@@ -86,6 +131,8 @@ export function EmailGenerator() {
                 }
 
                 bodyHtml = bodyHtml.replace(/\n/g, '<br>');
+                // Bọc vào khung font chữ chuẩn Enterprise (Calibri/Arial)
+                bodyHtml = `<div style="font-family: 'Calibri', 'Arial', sans-serif; font-size: 11pt; color: #333333; line-height: 1.5;">${bodyHtml}</div>`;
 
                 setTemplateSubject(subjectText);
                 setTemplateBody(bodyHtml);
@@ -148,6 +195,45 @@ export function EmailGenerator() {
             }
         };
         reader.readAsBinaryString(file);
+    };
+
+    // 3. Xử lý Upload Attachments
+    const handleAttachmentsUpload = (e) => {
+        const files = e.type === 'drop' ? e.dataTransfer.files : e.target.files;
+        if (!files || files.length === 0) {
+            setIsDraggingAttachments(false);
+            return;
+        }
+        setIsDraggingAttachments(false);
+        
+        const newAttachments = Array.from(files);
+        let incomingSize = newAttachments.reduce((sum, file) => sum + file.size, 0);
+        const existingSize = attachments.reduce((sum, a) => sum + a.file.size, 0);
+        
+        if (incomingSize + existingSize > 25 * 1024 * 1024) {
+            toast.warning('Cảnh báo: Tổng dung lượng file đính kèm quá lớn (>25MB). Nhiều Gateway bảo mật hoặc Gmail/Outlook sẽ từ chối nhận File!');
+        }
+
+        const readPromises = newAttachments.map(file => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const base64Data = evt.target.result.split(',')[1];
+                    resolve({ name: file.name, type: file.type || 'application/octet-stream', data: base64Data, file, size: file.size });
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+
+        Promise.all(readPromises).then(results => {
+            setAttachments(prev => [...prev, ...results]);
+            if (results.length > 0) toast.success(`Đã đính kèm ${results.length} tệp.`);
+        });
+        e.target.value = ""; // reset
+    };
+
+    const removeAttachment = (index) => {
+        setAttachments(prev => prev.filter((_, i) => i !== index));
     };
 
     // Helper: Định dạng ngày tháng sang tiếng Anh (Vd: 23/03/2026 -> March 23, 2026)
@@ -228,17 +314,41 @@ export function EmailGenerator() {
         return `=?utf-8?B?${window.btoa(unescape(encodeURIComponent(str)))}?=`;
     };
 
-    const generateEML = (from, to, cc, subject, body) => {
-        let eml = '';
+    const buildMimeMessage = (from, to, cc, subject, htmlBody, attachmentsList) => {
+        const boundary = "----=_NextPart_" + Math.random().toString(36).substring(2).toUpperCase();
+        
+        let eml = `X-Unsent: 1\r\n`;
         if (from) eml += `From: ${from}\r\n`;
         if (to) eml += `To: ${to}\r\n`;
         if (cc) eml += `Cc: ${cc}\r\n`;
         eml += `Subject: ${encodeSubject(subject)}\r\n`;
-        eml += `X-Unsent: 1\r\n`; 
         eml += `MIME-Version: 1.0\r\n`;
-        eml += `Content-Type: text/html; charset=utf-8\r\n`;
-        eml += `\r\n`;
-        eml += body;
+        
+        if (attachmentsList && attachmentsList.length > 0) {
+            eml += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
+            
+            // Text/HTML Part
+            eml += `--${boundary}\r\n`;
+            eml += `Content-Type: text/html; charset=utf-8\r\n`;
+            eml += `Content-Transfer-Encoding: base64\r\n\r\n`;
+            const bodyBase64 = window.btoa(unescape(encodeURIComponent(htmlBody))).replace(/.{1,76}/g, '$&\r\n');
+            eml += `${bodyBase64}\r\n\r\n`;
+            
+            // File Attachments Parts
+            for (const att of attachmentsList) {
+                eml += `--${boundary}\r\n`;
+                eml += `Content-Type: ${att.type}; name="=?utf-8?B?${window.btoa(unescape(encodeURIComponent(att.name)))}?="\r\n`;
+                eml += `Content-Transfer-Encoding: base64\r\n`;
+                eml += `Content-Disposition: attachment; filename="=?utf-8?B?${window.btoa(unescape(encodeURIComponent(att.name)))}?="\r\n\r\n`;
+                
+                const attBase64 = att.data.replace(/.{1,76}/g, '$&\r\n');
+                eml += `${attBase64}\r\n\r\n`;
+            }
+            eml += `--${boundary}--\r\n`;
+        } else {
+            eml += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
+            eml += htmlBody;
+        }
         return eml;
     };
 
@@ -303,7 +413,7 @@ export function EmailGenerator() {
                     return val;
                 });
                 
-                const emlContent = generateEML(from, to, cc, subject, body);
+                const emlContent = buildMimeMessage(from, to, cc, subject, body, attachments);
                 
                 // Chuẩn hóa tên file: Email_{STT}_{Recipient Name}
                 let stt = i + 1;
@@ -501,7 +611,43 @@ export function EmailGenerator() {
                         </div>
                     </div>
 
-                    {/* BƯỚC 3: NÚT GENERATE (FITTS LAW) */}
+                    {/* BƯỚC 3: UPLOAD ATTACHMENTS */}
+                    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                        <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-800">
+                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">3</span>
+                            File Đính kèm (Tuỳ chọn)
+                        </h2>
+                        <div 
+                            className={`relative border-2 border-dashed rounded-xl p-6 text-center group cursor-pointer transition-all duration-300 ${isDraggingAttachments ? 'border-blue-500 bg-blue-50 scale-105 shadow-md' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50/50'}`}
+                            onDragOver={(e) => { e.preventDefault(); setIsDraggingAttachments(true); }}
+                            onDragLeave={() => setIsDraggingAttachments(false)}
+                            onDrop={(e) => { e.preventDefault(); handleAttachmentsUpload(e); }}
+                        >
+                            <input
+                                type="file"
+                                multiple
+                                onChange={handleAttachmentsUpload}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            />
+                            <Paperclip className={`w-8 h-8 mx-auto mb-2 transition-colors ${isDraggingAttachments ? 'text-blue-600' : 'text-slate-400 group-hover:text-blue-500'}`} />
+                            <p className="text-sm font-medium text-slate-700 group-hover:text-blue-700">
+                                {isDraggingAttachments ? 'Thả File đính kèm vào đây!' : 'Kéo thả PDF, PDF,... chung cho tất cả'}
+                            </p>
+                        </div>
+                        {attachments.length > 0 && (
+                            <div className="space-y-2 mt-4 max-h-40 overflow-y-auto pr-1">
+                                {attachments.map((att, idx) => (
+                                    <div key={idx} className="flex justify-between items-center bg-slate-50 border border-slate-200 px-3 py-2 rounded text-xs text-slate-700 font-medium">
+                                        <div className="truncate pr-2 flex-1" title={att.name}>{att.name}</div>
+                                        <div className="text-slate-400 w-16 text-right">{(att.size / 1024 / 1024).toFixed(2)} MB</div>
+                                        <button onClick={() => removeAttachment(idx)} className="ml-3 text-red-400 hover:text-red-700 hover:bg-red-50 p-1 rounded transition-colors"><X className="w-3.5 h-3.5" /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* BƯỚC 4: NÚT GENERATE (FITTS LAW) */}
                     <div className="bg-gradient-to-br from-white to-blue-50/30 p-6 rounded-xl border border-blue-100 shadow-lg shadow-blue-900/5 relative overflow-hidden">
                         {isProcessing && (
                             <div className="absolute top-0 left-0 w-full bg-blue-100 h-1">
@@ -509,7 +655,7 @@ export function EmailGenerator() {
                             </div>
                         )}
                         <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
-                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">3</span>
+                            <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm shadow">4</span>
                             Duyệt Bản Nháp & Xuất File
                         </h2>
                         
