@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './features/Dashboard';
 import { TemplateManager } from './features/TemplateManager';
@@ -8,7 +8,7 @@ import { PlaceholderManager } from './features/PlaceholderManager';
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
@@ -18,7 +18,7 @@ function App() {
           <Route path="settings" element={<div className="p-8">Settings - Coming Soon</div>} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
